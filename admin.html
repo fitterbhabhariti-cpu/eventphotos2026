@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo indexer (organizer only)</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:680px;margin:0 auto;padding:20px}input,button{font:inherit;width:100%;padding:10px;margin:4px 0 12px;box-sizing:border-box}
+button{background:#e8a317;border:0;border-radius:8px;font-weight:700;cursor:pointer}pre{background:#0001;padding:10px;height:220px;overflow:auto;font-size:.85rem}progress{width:100%}</style></head><body>
+<h1>Photo indexer</h1>
+<p>Run this on your laptop. Keep the tab open until it finishes, then download <b>index.json</b>.</p>
+<label>Drive folder link (must be shared: Anyone with the link)</label><input id="folder">
+<label>Google API key (Drive API enabled)</label><input id="key">
+<label>Event title (shown on guest page)</label><input id="title" value="Event Photos · ઇવેન્ટ ફોટા">
+<button id="go">Start indexing</button><button id="save" disabled>Download index.json (works anytime)</button>
+<progress id="bar" value="0" max="1"></progress><pre id="log"></pre>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+<script>
+const M="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/",$=i=>document.getElementById(i);
+const log=t=>{$("log").textContent+=t+"\n";$("log").scrollTop=1e9};
+const out={title:"",photos:[],faces:[]};
+async function list(fid,key,acc){let tok="";do{const q=encodeURIComponent(`'${fid}' in parents and trashed=false`);
+const r=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,mimeType)&pageSize=1000&key=${key}${tok?"&pageToken="+tok:""}`);
+const j=await r.json();if(j.error)throw new Error(j.error.message);
+for(const f of j.files){if(f.mimeType==="application/vnd.google-apps.folder")await list(f.id,key,acc);else if(f.mimeType.startsWith("image/"))acc.push(f.id)}
+tok=j.nextPageToken}while(tok);return acc}
+const load=id=>new Promise((ok,no)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>ok(i);i.onerror=no;i.src=`https://lh3.googleusercontent.com/d/${id}=w1600`});
+$("go").onclick=async()=>{$("go").disabled=true;
+try{const fid=($("folder").value.match(/folders\/([\w-]+)|id=([\w-]+)/)||[,$("folder").value.trim()]).slice(1).find(Boolean),key=$("key").value.trim();
+out.title=$("title").value;log("Loading face models…");
+await Promise.all([faceapi.nets.ssdMobilenetv1.loadFromUri(M),faceapi.nets.faceLandmark68Net.loadFromUri(M),faceapi.nets.faceRecognitionNet.loadFromUri(M)]);
+log("Listing photos…");const ids=await list(fid,key,[]);log(ids.length+" photos found");$("bar").max=ids.length;$("save").disabled=false;
+const t0=Date.now();
+for(let n=0;n<ids.length;n++){const id=ids[n];
+try{const img=await load(id),f=await faceapi.detectAllFaces(img,new faceapi.SsdMobilenetv1Options({minConfidence:.5})).withFaceLandmarks().withFaceDescriptors();
+const p=out.photos.push(id)-1;for(const x of f)out.faces.push({p,d:Array.from(x.descriptor,v=>Math.round(v*1000)/1000)})}
+catch(e){log("Skipped "+id)}
+$("bar").value=n+1;if(n%10==9)log(`${n+1}/${ids.length} · ${out.faces.length} faces · ~${Math.round((Date.now()-t0)/(n+1)*(ids.length-n-1)/60000)} min left`)}
+log("Done. Download index.json.")}catch(e){log("Error: "+e.message);$("go").disabled=false}};
+$("save").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:"application/json"}));a.download="index.json";a.click()};
+</script></body></html>
